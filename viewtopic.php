@@ -90,29 +90,25 @@ if (!$db->num_rows($result))
 
 $cur_topic = $db->fetch_assoc($result);
 
+// Add current topic's id to array
+$cur_topic['id'] = $id;
+
 // Sort out who the moderators are and if we are currently a moderator (or an admin)
 $mods_array = ($cur_topic['moderators'] != '') ? unserialize($cur_topic['moderators']) : array();
 $is_admmod = ($pun_user['g_id'] == PUN_ADMIN || ($pun_user['g_moderator'] == '1' && array_key_exists($pun_user['username'], $mods_array))) ? true : false;
 if ($is_admmod)
 	$admin_ids = get_admin_ids();
 
+// Create array to keep track of current user's permissions and UI states (post button, pagination, subscriptions, etc)
+$cur_user = array();
+
 // Can we or can we not post replies?
-if ($cur_topic['closed'] == '0')
-{
-	if (($cur_topic['post_replies'] == '' && $pun_user['g_post_replies'] == '1') || $cur_topic['post_replies'] == '1' || $is_admmod)
-		$post_link = "\t\t\t".'<p class="postlink conr"><a href="post.php?tid='.$id.'">'.$lang_topic['Post reply'].'</a></p>'."\n";
-	else
-		$post_link = '';
-}
+if ($is_admmod)
+	$cur_user['can_post'] = true;
+elseif ($cur_topic['closed'] == '0' && (($cur_topic['post_replies'] == '' && $pun_user['g_post_replies'] == '1') || $cur_topic['post_replies'] == '1'))
+	$cur_user['can_post'] = true;
 else
-{
-	$post_link = $lang_topic['Topic closed'];
-
-	if ($is_admmod)
-		$post_link .= ' / <a href="post.php?tid='.$id.'">'.$lang_topic['Post reply'].'</a>';
-
-	$post_link = "\t\t\t".'<p class="postlink conr">'.$post_link.'</p>'."\n";
-}
+	$cur_user['can_post'] = false;
 
 
 // Add/update this topic in our list of tracked topics
@@ -130,15 +126,16 @@ $num_pages = ceil(($cur_topic['num_replies'] + 1) / $pun_user['disp_posts']);
 $p = (!isset($_GET['p']) || $_GET['p'] <= 1 || $_GET['p'] > $num_pages) ? 1 : intval($_GET['p']);
 $start_from = $pun_user['disp_posts'] * ($p - 1);
 
-// Generate paging links
-$paging_links = '<span class="pages-label">'.$lang_common['Pages'].' </span>'.paginate($num_pages, $p, 'viewtopic.php?id='.$id);
+// Add pagination data to current user array
+$cur_user['num_pages'] = $num_pages;
+$cur_user['p'] = $p;
 
 
 if ($pun_config['o_censoring'] == '1')
 	$cur_topic['subject'] = censor_words($cur_topic['subject']);
 
 
-$quickpost = false;
+// Check whether user can quick post, and prepare fields if so
 if ($pun_config['o_quickpost'] == '1' &&
 	($cur_topic['post_replies'] == '1' || ($cur_topic['post_replies'] == '' && $pun_user['g_post_replies'] == '1')) &&
 	($cur_topic['closed'] == '0' || $is_admmod))
@@ -153,19 +150,13 @@ if ($pun_config['o_quickpost'] == '1' &&
 		if ($pun_config['p_force_guest_email'] == '1')
 			$required_fields['req_email'] = $lang_common['Email'];
 	}
-	$quickpost = true;
-}
-
-if (!$pun_user['is_guest'] && $pun_config['o_topic_subscriptions'] == '1')
-{
-	if ($cur_topic['is_subscribed'])
-		// I apologize for the variable naming here. It's a mix of subscription and action I guess :-)
-		$subscraction = "\t\t".'<p class="subscribelink clearb"><span>'.$lang_topic['Is subscribed'].' - </span><a href="misc.php?action=unsubscribe&amp;tid='.$id.'">'.$lang_topic['Unsubscribe'].'</a></p>'."\n";
-	else
-		$subscraction = "\t\t".'<p class="subscribelink clearb"><a href="misc.php?action=subscribe&amp;tid='.$id.'">'.$lang_topic['Subscribe'].'</a></p>'."\n";
+	$cur_user['can_quickpost'] = true;
 }
 else
-	$subscraction = '';
+	$cur_user['can_quickpost'] = false;
+
+// Check whether user can subscribe to topics
+$cur_user['can_subscribe'] = (!$pun_user['is_guest'] && $pun_config['o_topic_subscriptions'] == '1') ? true : false;
 
 // Add relationship meta tags
 $page_head = array();
@@ -189,28 +180,10 @@ define('PUN_ALLOW_INDEX', 1);
 define('PUN_ACTIVE_PAGE', 'index');
 require PUN_ROOT.'header.php';
 
-?>
-<div class="linkst">
-	<div class="inbox crumbsplus">
-		<ul class="crumbs">
-			<li><a href="index.php"><?php echo $lang_common['Index'] ?></a></li>
-			<li><span>»&#160;</span><a href="viewforum.php?id=<?php echo $cur_topic['forum_id'] ?>"><?php echo pun_htmlspecialchars($cur_topic['forum_name']) ?></a></li>
-			<li><span>»&#160;</span><strong><a href="viewtopic.php?id=<?php echo $id ?>"><?php echo pun_htmlspecialchars($cur_topic['subject']) ?></a></strong></li>
-		</ul>
-		<div class="pagepost">
-			<p class="pagelink conl"><?php echo $paging_links ?></p>
-<?php echo $post_link ?>
-		</div>
-		<div class="clearer"></div>
-	</div>
-</div>
-
-<?php
-
-
 require PUN_ROOT.'include/parser.php';
 
-$post_count = 0; // Keep track of post numbers
+// Keep track of post count for current page
+$post_count = 0;
 
 // Retrieve a list of post IDs, LIMIT is (really) expensive so we only fetch the IDs here then later fetch the remaining data
 $result = $db->query('SELECT id FROM '.$db->prefix.'posts WHERE topic_id='.$id.' ORDER BY id LIMIT '.$start_from.','.$pun_user['disp_posts']) or error('Unable to fetch post IDs', __FILE__, __LINE__, $db->error());
@@ -222,40 +195,49 @@ for ($i = 0;$cur_post_id = $db->result($result, $i);$i++)
 if (empty($post_ids))
 	error('The post table and topic table seem to be out of sync!', __FILE__, __LINE__);
 
+// Create posts array for sending all posts to template
+$posts = array();
+
 // Retrieve the posts (and their respective poster/online status)
 $result = $db->query('SELECT u.email, u.title, u.url, u.location, u.signature, u.email_setting, u.num_posts, u.registered, u.admin_note, p.id, p.poster AS username, p.poster_id, p.poster_ip, p.poster_email, p.message, p.hide_smilies, p.posted, p.edited, p.edited_by, g.g_id, g.g_user_title, g.g_promote_next_group, o.user_id AS is_online FROM '.$db->prefix.'posts AS p INNER JOIN '.$db->prefix.'users AS u ON u.id=p.poster_id INNER JOIN '.$db->prefix.'groups AS g ON g.g_id=u.group_id LEFT JOIN '.$db->prefix.'online AS o ON (o.user_id=u.id AND o.user_id!=1 AND o.idle=0) WHERE p.id IN ('.implode(',', $post_ids).') ORDER BY p.id', true) or error('Unable to fetch post info', __FILE__, __LINE__, $db->error());
 while ($cur_post = $db->fetch_assoc($result))
 {
 	$post_count++;
-	$user_avatar = '';
-	$user_info = array();
-	$user_contacts = array();
-	$post_actions = array();
-	$is_online = '';
-	$signature = '';
+	
+	// Initialize extra keys and subarrays to put into cur_post array
+	$cur_post['show_user_link'] = false;
+	$cur_post['user_avatar'] = '';
+	$cur_post['user_info'] = array();
+	$cur_post['user_contacts'] = array();
+	$cur_post['post_actions'] = array();
+	$cur_post['is_online'] = '';
+	$cur_post['signature'] = '';
+	
+	// Separate array from user_info b/c using pun_htmlspecialchars on admin links causes output problems
+	$cur_post['user_admin'] = array();
+	
+	$cur_post['is_first_post'] = ($cur_post['id'] == $cur_topic['first_post_id']) ? true : false;
+	$cur_post['post_num'] = $start_from + $post_count;
+	$cur_post['user_title'] = get_title($cur_post);
 
 	// If the poster is a registered user
 	if ($cur_post['poster_id'] > 1)
 	{
 		if ($pun_user['g_view_users'] == '1')
-			$username = '<a href="profile.php?id='.$cur_post['poster_id'].'">'.pun_htmlspecialchars($cur_post['username']).'</a>';
-		else
-			$username = pun_htmlspecialchars($cur_post['username']);
-
-		$user_title = get_title($cur_post);
+			$cur_post['show_user_link'] = true;
 
 		if ($pun_config['o_censoring'] == '1')
-			$user_title = censor_words($user_title);
+			$cur_post['user_title'] = censor_words($cur_post['user_title']);
 
-		// Format the online indicator
-		$is_online = ($cur_post['is_online'] == $cur_post['poster_id']) ? '<strong>'.$lang_topic['Online'].'</strong>' : '<span>'.$lang_topic['Offline'].'</span>';
+		// Check whether poster is currently online
+		$cur_post['is_online'] = ($cur_post['is_online'] == $cur_post['poster_id']) ? true : false;
 
 		if ($pun_config['o_avatars'] == '1' && $pun_user['show_avatars'] != '0')
 		{
 			if (isset($user_avatar_cache[$cur_post['poster_id']]))
-				$user_avatar = $user_avatar_cache[$cur_post['poster_id']];
+				$cur_post['user_avatar'] = $user_avatar_cache[$cur_post['poster_id']];
 			else
-				$user_avatar = $user_avatar_cache[$cur_post['poster_id']] = generate_avatar_markup($cur_post['poster_id']);
+				$cur_post['user_avatar'] = $user_avatar_cache[$cur_post['poster_id']] = generate_avatar_markup($cur_post['poster_id']);
 		}
 
 		// We only show location, register date, post count and the contact links if "Show user info" is enabled
@@ -266,85 +248,82 @@ while ($cur_post = $db->fetch_assoc($result))
 				if ($pun_config['o_censoring'] == '1')
 					$cur_post['location'] = censor_words($cur_post['location']);
 
-				$user_info[] = '<dd><span>'.$lang_topic['From'].' '.pun_htmlspecialchars($cur_post['location']).'</span></dd>';
+				$cur_post['user_info']['location'] = $lang_topic['From'].' '.$cur_post['location'];
 			}
 
-			$user_info[] = '<dd><span>'.$lang_topic['Registered'].' '.format_time($cur_post['registered'], true).'</span></dd>';
+			$cur_post['user_info']['registered'] = $lang_topic['Registered'].' '.format_time($cur_post['registered'], true);
 
 			if ($pun_config['o_show_post_count'] == '1' || $pun_user['is_admmod'])
-				$user_info[] = '<dd><span>'.$lang_topic['Posts'].' '.forum_number_format($cur_post['num_posts']).'</span></dd>';
+				$cur_post['user_info']['num_posts'] = $lang_topic['Posts'].' '.forum_number_format($cur_post['num_posts']);
 
 			// Now let's deal with the contact links (Email and URL)
 			if ((($cur_post['email_setting'] == '0' && !$pun_user['is_guest']) || $pun_user['is_admmod']) && $pun_user['g_send_email'] == '1')
-				$user_contacts[] = '<span class="email"><a href="mailto:'.pun_htmlspecialchars($cur_post['email']).'">'.$lang_common['Email'].'</a></span>';
+				$cur_post['user_contacts']['email'] = '<a href="mailto:'.$cur_post['email'].'">'.$lang_common['Email'].'</a>';
 			else if ($cur_post['email_setting'] == '1' && !$pun_user['is_guest'] && $pun_user['g_send_email'] == '1')
-				$user_contacts[] = '<span class="email"><a href="misc.php?email='.$cur_post['poster_id'].'">'.$lang_common['Email'].'</a></span>';
+				$cur_post['user_contacts']['email'] = '<a href="misc.php?email='.$cur_post['poster_id'].'">'.$lang_common['Email'].'</a>';
 
 			if ($cur_post['url'] != '')
 			{
 				if ($pun_config['o_censoring'] == '1')
 					$cur_post['url'] = censor_words($cur_post['url']);
 
-				$user_contacts[] = '<span class="website"><a href="'.pun_htmlspecialchars($cur_post['url']).'" rel="nofollow">'.$lang_topic['Website'].'</a></span>';
+				$cur_post['user_contacts']['website'] = '<a href="'.$cur_post['url'].'" rel="nofollow">'.$lang_topic['Website'].'</a>';
 			}
 		}
 
 		if ($pun_user['g_id'] == PUN_ADMIN || ($pun_user['g_moderator'] == '1' && $pun_user['g_mod_promote_users'] == '1'))
 		{
 			if ($cur_post['g_promote_next_group'])
-				$user_info[] = '<dd><span><a href="profile.php?action=promote&amp;id='.$cur_post['poster_id'].'&amp;pid='.$cur_post['id'].'">'.$lang_topic['Promote user'].'</a></span></dd>';
+				$cur_post['user_admin']['promote_user'] = '<a href="profile.php?action=promote&amp;id='.$cur_post['poster_id'].'&amp;pid='.$cur_post['id'].'">'.$lang_topic['Promote user'].'</a>';
 		}
 
 		if ($pun_user['is_admmod'])
 		{
-			$user_info[] = '<dd><span><a href="moderate.php?get_host='.$cur_post['id'].'" title="'.pun_htmlspecialchars($cur_post['poster_ip']).'">'.$lang_topic['IP address logged'].'</a></span></dd>';
+			$cur_post['user_admin']['poster_ip'] = '<a href="moderate.php?get_host='.$cur_post['id'].'" title="'.$cur_post['poster_ip'].'">'.$lang_topic['IP address logged'].'</a>';
 
 			if ($cur_post['admin_note'] != '')
-				$user_info[] = '<dd><span>'.$lang_topic['Note'].' <strong>'.pun_htmlspecialchars($cur_post['admin_note']).'</strong></span></dd>';
+				$cur_post['user_admin']['admin_note'] = $lang_topic['Note'].' '.pun_htmlspecialchars($cur_post['admin_note']);
 		}
 	}
 	// If the poster is a guest (or a user that has been deleted)
 	else
 	{
-		$username = pun_htmlspecialchars($cur_post['username']);
-		$user_title = get_title($cur_post);
-
 		if ($pun_user['is_admmod'])
-			$user_info[] = '<dd><span><a href="moderate.php?get_host='.$cur_post['id'].'" title="'.pun_htmlspecialchars($cur_post['poster_ip']).'">'.$lang_topic['IP address logged'].'</a></span></dd>';
+			$cur_post['user_admin']['poster_ip'] = '<a href="moderate.php?get_host='.$cur_post['id'].'" title="'.$cur_post['poster_ip'].'">'.$lang_topic['IP address logged'].'</a>';
 
 		if ($pun_config['o_show_user_info'] == '1' && $cur_post['poster_email'] != '' && !$pun_user['is_guest'] && $pun_user['g_send_email'] == '1')
-			$user_contacts[] = '<span class="email"><a href="mailto:'.pun_htmlspecialchars($cur_post['poster_email']).'">'.$lang_common['Email'].'</a></span>';
+			$cur_post['user_contacts']['email'] = '<a href="mailto:'.$cur_post['poster_email'].'">'.$lang_common['Email'].'</a>';
 	}
 
 	// Generation post action array (quote, edit, delete etc.)
 	if (!$is_admmod)
 	{
 		if (!$pun_user['is_guest'])
-			$post_actions[] = '<li class="postreport"><span><a href="misc.php?report='.$cur_post['id'].'">'.$lang_topic['Report'].'</a></span></li>';
+			$cur_post['post_actions']['report'] = '<li class="postreport"><span><a href="misc.php?report='.$cur_post['id'].'">'.$lang_topic['Report'].'</a></span></li>';
 
 		if ($cur_topic['closed'] == '0')
 		{
 			if ($cur_post['poster_id'] == $pun_user['id'])
 			{
 				if ((($start_from + $post_count) == 1 && $pun_user['g_delete_topics'] == '1') || (($start_from + $post_count) > 1 && $pun_user['g_delete_posts'] == '1'))
-					$post_actions[] = '<li class="postdelete"><span><a href="delete.php?id='.$cur_post['id'].'">'.$lang_topic['Delete'].'</a></span></li>';
+					$cur_post['post_actions']['delete'] = '<li class="postdelete"><span><a href="delete.php?id='.$cur_post['id'].'">'.$lang_topic['Delete'].'</a></span></li>';
 				if ($pun_user['g_edit_posts'] == '1')
-					$post_actions[] = '<li class="postedit"><span><a href="edit.php?id='.$cur_post['id'].'">'.$lang_topic['Edit'].'</a></span></li>';
+					$cur_post['post_actions']['edit'] = '<li class="postedit"><span><a href="edit.php?id='.$cur_post['id'].'">'.$lang_topic['Edit'].'</a></span></li>';
 			}
 
 			if (($cur_topic['post_replies'] == '' && $pun_user['g_post_replies'] == '1') || $cur_topic['post_replies'] == '1')
-				$post_actions[] = '<li class="postquote"><span><a href="post.php?tid='.$id.'&amp;qid='.$cur_post['id'].'">'.$lang_topic['Quote'].'</a></span></li>';
+				$cur_post['post_actions']['quote'] = '<li class="postquote"><span><a href="post.php?tid='.$id.'&amp;qid='.$cur_post['id'].'">'.$lang_topic['Quote'].'</a></span></li>';
 		}
 	}
 	else
 	{
-		$post_actions[] = '<li class="postreport"><span><a href="misc.php?report='.$cur_post['id'].'">'.$lang_topic['Report'].'</a></span></li>';
+		$cur_post['post_actions']['report'] = '<li class="postreport"><span><a href="misc.php?report='.$cur_post['id'].'">'.$lang_topic['Report'].'</a></span></li>';
 		if ($pun_user['g_id'] == PUN_ADMIN || !in_array($cur_post['poster_id'], $admin_ids))
 		{
-			$post_actions[] = '<li class="postdelete"><span><a href="delete.php?id='.$cur_post['id'].'">'.$lang_topic['Delete'].'</a></span></li>';
-			$post_actions[] = '<li class="postedit"><span><a href="edit.php?id='.$cur_post['id'].'">'.$lang_topic['Edit'].'</a></span></li>';
+			$cur_post['post_actions']['delete'] = '<li class="postdelete"><span><a href="delete.php?id='.$cur_post['id'].'">'.$lang_topic['Delete'].'</a></span></li>';
+			$cur_post['post_actions']['edit'] = '<li class="postedit"><span><a href="edit.php?id='.$cur_post['id'].'">'.$lang_topic['Edit'].'</a></span></li>';
 		}
-		$post_actions[] = '<li class="postquote"><span><a href="post.php?tid='.$id.'&amp;qid='.$cur_post['id'].'">'.$lang_topic['Quote'].'</a></span></li>';
+		$cur_post['post_actions']['quote'] = '<li class="postquote"><span><a href="post.php?tid='.$id.'&amp;qid='.$cur_post['id'].'">'.$lang_topic['Quote'].'</a></span></li>';
 	}
 
 	// Perform the main parsing of the message (BBCode, smilies, censor words etc)
@@ -354,73 +333,24 @@ while ($cur_post = $db->fetch_assoc($result))
 	if ($pun_config['o_signatures'] == '1' && $cur_post['signature'] != '' && $pun_user['show_sig'] != '0')
 	{
 		if (isset($signature_cache[$cur_post['poster_id']]))
-			$signature = $signature_cache[$cur_post['poster_id']];
+			$cur_post['signature'] = $signature_cache[$cur_post['poster_id']];
 		else
 		{
-			$signature = parse_signature($cur_post['signature']);
-			$signature_cache[$cur_post['poster_id']] = $signature;
+			$cur_post['signature'] = parse_signature($cur_post['signature']);
+			$signature_cache[$cur_post['poster_id']] = $cur_post['signature'];
 		}
 	}
-
-?>
-<div id="p<?php echo $cur_post['id'] ?>" class="blockpost<?php echo ($post_count % 2 == 0) ? ' roweven' : ' rowodd' ?><?php if ($cur_post['id'] == $cur_topic['first_post_id']) echo ' firstpost'; ?><?php if ($post_count == 1) echo ' blockpost1'; ?>">
-	<h2><span><span class="conr">#<?php echo ($start_from + $post_count) ?></span> <a href="viewtopic.php?pid=<?php echo $cur_post['id'].'#p'.$cur_post['id'] ?>"><?php echo format_time($cur_post['posted']) ?></a></span></h2>
-	<div class="box">
-		<div class="inbox">
-			<div class="postbody">
-				<div class="postleft">
-					<dl>
-						<dt><strong><?php echo $username ?></strong></dt>
-						<dd class="usertitle"><strong><?php echo $user_title ?></strong></dd>
-<?php if ($user_avatar != '') echo "\t\t\t\t\t\t".'<dd class="postavatar">'.$user_avatar.'</dd>'."\n"; ?>
-<?php if (count($user_info)) echo "\t\t\t\t\t\t".implode("\n\t\t\t\t\t\t", $user_info)."\n"; ?>
-<?php if (count($user_contacts)) echo "\t\t\t\t\t\t".'<dd class="usercontacts">'.implode(' ', $user_contacts).'</dd>'."\n"; ?>
-					</dl>
-				</div>
-				<div class="postright">
-					<h3><?php if ($cur_post['id'] != $cur_topic['first_post_id']) echo $lang_topic['Re'].' '; ?><?php echo pun_htmlspecialchars($cur_topic['subject']) ?></h3>
-					<div class="postmsg">
-						<?php echo $cur_post['message']."\n" ?>
-<?php if ($cur_post['edited'] != '') echo "\t\t\t\t\t\t".'<p class="postedit"><em>'.$lang_topic['Last edit'].' '.pun_htmlspecialchars($cur_post['edited_by']).' ('.format_time($cur_post['edited']).')</em></p>'."\n"; ?>
-					</div>
-<?php if ($signature != '') echo "\t\t\t\t\t".'<div class="postsignature postmsg"><hr />'.$signature.'</div>'."\n"; ?>
-				</div>
-			</div>
-		</div>
-		<div class="inbox">
-			<div class="postfoot clearb">
-				<div class="postfootleft"><?php if ($cur_post['poster_id'] > 1) echo '<p>'.$is_online.'</p>'; ?></div>
-<?php if (count($post_actions)) echo "\t\t\t\t".'<div class="postfootright">'."\n\t\t\t\t\t".'<ul>'."\n\t\t\t\t\t\t".implode("\n\t\t\t\t\t\t", $post_actions)."\n\t\t\t\t\t".'</ul>'."\n\t\t\t\t".'</div>'."\n" ?>
-			</div>
-		</div>
-	</div>
-</div>
-
-<?php
-
+	
+	// Add the current posts' info to $posts array, with post id as key
+	$posts[$cur_post['id']] = $cur_post;
 }
 
-?>
-<div class="postlinksb">
-	<div class="inbox crumbsplus">
-		<div class="pagepost">
-			<p class="pagelink conl"><?php echo $paging_links ?></p>
-<?php echo $post_link ?>
-		</div>
-		<ul class="crumbs">
-			<li><a href="index.php"><?php echo $lang_common['Index'] ?></a></li>
-			<li><span>»&#160;</span><a href="viewforum.php?id=<?php echo $cur_topic['forum_id'] ?>"><?php echo pun_htmlspecialchars($cur_topic['forum_name']) ?></a></li>
-			<li><span>»&#160;</span><strong><a href="viewtopic.php?id=<?php echo $id ?>"><?php echo pun_htmlspecialchars($cur_topic['subject']) ?></a></strong></li>
-		</ul>
-<?php echo $subscraction ?>
-		<div class="clearer"></div>
-	</div>
-</div>
-
-<?php
+// Run template function to output page main contents HTML
+require PUN_ROOT.'include/subtemplate/viewtopic_template.php';
+viewtopic_template($cur_topic, $cur_user, $posts);
 
 // Display quick post if enabled
-if ($quickpost)
+if ($cur_user['can_quickpost'])
 {
 
 $cur_index = 1;
