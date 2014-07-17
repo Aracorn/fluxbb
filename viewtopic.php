@@ -299,31 +299,31 @@ while ($cur_post = $db->fetch_assoc($result))
 	if (!$is_admmod)
 	{
 		if (!$pun_user['is_guest'])
-			$cur_post['post_actions']['report'] = '<li class="postreport"><span><a href="misc.php?report='.$cur_post['id'].'">'.$lang_topic['Report'].'</a></span></li>';
+			$cur_post['post_actions']['report'] = 'misc.php?report='.$cur_post['id'];
 
 		if ($cur_topic['closed'] == '0')
 		{
 			if ($cur_post['poster_id'] == $pun_user['id'])
 			{
 				if ((($start_from + $post_count) == 1 && $pun_user['g_delete_topics'] == '1') || (($start_from + $post_count) > 1 && $pun_user['g_delete_posts'] == '1'))
-					$cur_post['post_actions']['delete'] = '<li class="postdelete"><span><a href="delete.php?id='.$cur_post['id'].'">'.$lang_topic['Delete'].'</a></span></li>';
+					$cur_post['post_actions']['delete'] = 'delete.php?id='.$cur_post['id'];
 				if ($pun_user['g_edit_posts'] == '1')
-					$cur_post['post_actions']['edit'] = '<li class="postedit"><span><a href="edit.php?id='.$cur_post['id'].'">'.$lang_topic['Edit'].'</a></span></li>';
+					$cur_post['post_actions']['edit'] = 'edit.php?id='.$cur_post['id'];
 			}
 
 			if (($cur_topic['post_replies'] == '' && $pun_user['g_post_replies'] == '1') || $cur_topic['post_replies'] == '1')
-				$cur_post['post_actions']['quote'] = '<li class="postquote"><span><a href="post.php?tid='.$id.'&amp;qid='.$cur_post['id'].'">'.$lang_topic['Quote'].'</a></span></li>';
+				$cur_post['post_actions']['quote'] = 'post.php?tid='.$id.'&amp;qid='.$cur_post['id'];
 		}
 	}
 	else
 	{
-		$cur_post['post_actions']['report'] = '<li class="postreport"><span><a href="misc.php?report='.$cur_post['id'].'">'.$lang_topic['Report'].'</a></span></li>';
+		$cur_post['post_actions']['report'] = 'misc.php?report='.$cur_post['id'];
 		if ($pun_user['g_id'] == PUN_ADMIN || !in_array($cur_post['poster_id'], $admin_ids))
 		{
-			$cur_post['post_actions']['delete'] = '<li class="postdelete"><span><a href="delete.php?id='.$cur_post['id'].'">'.$lang_topic['Delete'].'</a></span></li>';
-			$cur_post['post_actions']['edit'] = '<li class="postedit"><span><a href="edit.php?id='.$cur_post['id'].'">'.$lang_topic['Edit'].'</a></span></li>';
+			$cur_post['post_actions']['delete'] = 'delete.php?id='.$cur_post['id'];
+			$cur_post['post_actions']['edit'] = 'edit.php?id='.$cur_post['id'];
 		}
-		$cur_post['post_actions']['quote'] = '<li class="postquote"><span><a href="post.php?tid='.$id.'&amp;qid='.$cur_post['id'].'">'.$lang_topic['Quote'].'</a></span></li>';
+		$cur_post['post_actions']['quote'] = 'post.php?tid='.$id.'&amp;qid='.$cur_post['id'];
 	}
 
 	// Perform the main parsing of the message (BBCode, smilies, censor words etc)

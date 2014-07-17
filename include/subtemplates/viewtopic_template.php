@@ -152,7 +152,19 @@ function viewtopic_template($cur_topic, $cur_user, $posts = array()) {
 				<div class="inbox">
 					<div class="postfoot clearb">
 						<div class="postfootleft"><?php if ($cur_post['poster_id'] > 1) echo '<p>'.$is_online.'</p>'; ?></div>
-		<?php if (count($cur_post['post_actions'])) echo "\t\t\t\t".'<div class="postfootright">'."\n\t\t\t\t\t".'<ul>'."\n\t\t\t\t\t\t".implode("\n\t\t\t\t\t\t", $cur_post['post_actions'])."\n\t\t\t\t\t".'</ul>'."\n\t\t\t\t".'</div>'."\n" ?>
+		<?php
+		if (count($cur_post['post_actions']))
+		{
+			echo "\t\t\t\t".'<div class="postfootright">'."\n\t\t\t\t\t".'<ul>';
+			foreach ($cur_post['post_actions'] as $action => $url)
+			{
+				// Label array key is just the action capitalized
+				$label_key = ucfirst($action);
+				echo "\n\t\t\t\t\t\t".'<li class="post'.$action.'"><span><a href="'.$url.'">'.$lang_topic[$label_key].'</a></span></li>';
+			}
+			echo "\n\t\t\t\t\t".'</ul>'."\n\t\t\t\t".'</div>'."\n";
+		}
+		?>
 					</div>
 				</div>
 			</div>
